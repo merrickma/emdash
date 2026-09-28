@@ -165,6 +165,41 @@ describe("Scheduled system cleanup", () => {
 		}
 	});
 
+	it("leaves the 404 log alone while it is under the cap", async () => {
+		const db = await setupTestDatabase();
+		const rows = Array.from({ length: 3 }, (_, index) => ({
+			id: ulid(),
+			path: `/under-cap-${index}`,
+			referrer: null,
+			user_agent: null,
+			ip: null,
+			hits: 1,
+			last_seen_at: new Date(index).toISOString(),
+			created_at: new Date(index).toISOString(),
+		}));
+
+		try {
+			await db.insertInto("_emdash_404_log").values(rows).execute();
+
+			const first = await runSystemCleanup(db);
+			const second = await runSystemCleanup(db);
+			expect(first.notFoundLog).toBe(0);
+			expect(second.notFoundLog).toBe(0);
+			expect(
+				Number(
+					(
+						await db
+							.selectFrom("_emdash_404_log")
+							.select((eb) => eb.fn.countAll<number>().as("c"))
+							.executeTakeFirstOrThrow()
+					).c,
+				),
+			).toBe(3);
+		} finally {
+			await db.destroy();
+		}
+	});
+
 	it("prunes revision entries queued by revision writes", async () => {
 		const db = await setupTestDatabaseWithCollections();
 		const revisionRepo = new RevisionRepository(db);
